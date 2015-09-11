@@ -130,6 +130,8 @@ HMDEV_Set($@)
 {
 	my ($hash, @a) = @_;
 
+	return "Unknown argument ? choose one of " if ($a[1] eq "?");
+
 	return "invalid set call @a" if(@a != 3 && @a != 4);
 	# We delegate this call to the HMRPC IODev, after having added the device address
 	if(@a==4)
@@ -147,6 +149,9 @@ sub
 HMDEV_Get($@)
 {
 	my ($hash, @a) = @_;
+
+	return "Unknown argument ? choose one of " if ($a[1] eq "?");
+
 	return "argument missing, usage is <attribute> @a" if(@a!=2);
 	# Like set, we simply delegate to the HMPRC IODev here
 	return HMRPC_Get($hash->{IODev},$hash->{IODev}->{NAME},$hash->{hmaddr},$a[1]);

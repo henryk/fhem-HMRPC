@@ -237,6 +237,11 @@ HMRPC_Set($@)
 		close(select($oldout));
 		return $res;
 	}
+	elsif($cmd eq "?")
+	{
+		return "Unknown argument $cmd, choose one of req";
+	}
+
 	
 	my $ret;
 	if(@a==5)
@@ -267,6 +272,9 @@ sub
 HMRPC_Get($@)
 {
 	my ($hash,@a) = @_;
+	
+	return "Unknown argument ? choose one of " if ($a[1] eq "?");
+	
 	return "argument missing, usage is <id> <attribute> @a" if(@a!=3);	
 	my $ret=$hash->{client}->simple_request("getValue",$a[1],$a[2]);
 	if(ref($ret))
