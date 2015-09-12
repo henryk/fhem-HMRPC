@@ -203,7 +203,7 @@ HMRPC_Read($)
 	# Handle an incoming callback
 	#
 	my $conn=$hash->{server}->{__daemon}->accept();
-	$conn->timeout(20);
+	$conn->timeout(2);
 	$hash->{server}->process_request($conn);
 	$conn->close;
 	undef $conn;
