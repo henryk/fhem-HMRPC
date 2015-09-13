@@ -81,7 +81,10 @@ HMDEV_Parse($$)
   if(!$hash)
   {
   	  Log(2,"Received callback for unknown device $msg");
-  	  return "UNDEFINED HMDEV_$addr HMDEV $addr";
+  	  # Need to rewrite the device name here
+  	  my $safe_name = "HMDEV_$addr";
+  	  $safe_name =~ s/[^A-Za-z0-9.:_]/_/g;
+  	  return "UNDEFINED $safe_name HMDEV $addr";
   }
   
   # Let's see whether we can update our devinfo now
