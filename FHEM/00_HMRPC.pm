@@ -24,6 +24,7 @@ use Time::HiRes qw(gettimeofday);
 use RPC::XML::Server;
 use RPC::XML::Client;
 use Dumpvalue;
+use HttpUtils;
 
 my $dumper=new Dumpvalue;
 $dumper->veryCompact(1);
@@ -34,7 +35,6 @@ sub HMRPC_Initialize($)
 
 	$hash->{DefFn} = "HMRPC_Define";
 	$hash->{ShutdownFn} = "HMRPC_Shutdown";
-	$hash->{ReadFn} = "HMRPC_Read";
 	$hash->{SetFn} = "HMRPC_Set";
 	$hash->{GetFn} = "HMRPC_Get";
 	$hash->{Clients} = ":HMDEV:";
@@ -67,12 +67,13 @@ HMRPC_Define($$)
 		return $msg;
 	}
 
+	my $name = $a[0];
 	$hash->{serveraddr}=$a[2];
 	$hash->{serverport}=$a[3];
 	
 	$hash->{client}=RPC::XML::Client->new("http://$a[2]:$a[3]/");
 	my $callbackport=5400+$hash->{serverport};
-	$hash->{server}=RPC::XML::Server->new(port=>$callbackport);
+	$hash->{server}=RPC::XML::Server->new(no_http=>1);
 	if(!ref($hash->{server}))
 	{
 		# Creating the server failed, perhaps because the port was
@@ -97,21 +98,62 @@ HMRPC_Define($$)
 		{name=>"listDevices",signature=>["array string"],code=>sub{return RPC::XML::array->new()} }
 	);
 	
+	my $link = "HMRPC_$name";
+	my $url = "/$link";
+	Log3 $name, 3, "Registering HMRPC $name for URL $url...";
+	$data{FWEXT}{$url}{deviceName}= $name;
+	$data{FWEXT}{$url}{FUNC} = "HMRPC_CGI";
+
+
 	$hash->{STATE} = "Initialized";
-	$hash->{SERVERSOCKET}=$hash->{server}->{__daemon};
-	$hash->{FD}=$hash->{SERVERSOCKET}->fileno();
-	$hash->{PORT}=$hash->{server}->{__daemon}->sockport();
 	
 	# This will also register the callback
 	HMRPC_CheckCallback($hash);
 
-	$selectlist{"$hash->{serveraddr}.$hash->{serverport}"} = $hash;
-	
 	#
 	# All is well
 	#
 	return 0;
 }
+
+sub
+HMRPC_CGI() {
+	my ($request) = @_;   # /$infix/filename
+	
+	if($request =~ m,^(/[^/]+)(?:/([^&]*)?(?:&(.*))?)?$,s) {
+		my $link    = $1;
+		my $filename= $2;
+		my $content = $3;
+		my $name;
+
+		# get device name
+		$name= $data{FWEXT}{$link}{deviceName} if($data{FWEXT}{$link});
+
+		#Debug "link= $link";
+		#Debug "filename= $filename";
+		#Debug "name= $name";
+		#Debug "content= $content";
+
+		my $response;
+		# return error if no such device
+		if($name eq "") {
+			$response = RPC::XML::response->new( RPC::XML::fault->new(404, "No such device") );
+		} elsif($content eq "") {
+			$response = RPC::XML::response->new( RPC::XML::fault->new(400, "No XML content provided") );
+		} else {
+			my $hash = $defs{$name};
+			$response = $hash->{server}->dispatch($content);
+		}
+
+		my $buf;
+		utf8::encode($buf = $response->as_string);
+		
+		return("text/xml", $buf);
+	} else {
+		return("text/plain; charset=utf-8", "Illegal request: $request");
+	}
+}   
+
 
 sub
 HMRPC_CheckCallback($)
@@ -149,7 +191,9 @@ HMRPC_RegisterCallback($)
 		Log(2,"HMRPC unable to connect to ".$hash->{serveraddr}.":".$hash->{serverport}." ($!), will retry later");
 		return;
 	}
-	$hash->{callbackurl}="http://".$dummysock->sockhost().":".$hash->{PORT}."/fh";
+	
+	my $name = $hash->{NAME};
+	$hash->{callbackurl}="http://".$dummysock->sockhost().":8083/fhem/HMRPC_$name/request";
 	$dummysock->close();
 	Log(2, "HMRPC callback listening on $hash->{callbackurl}");
 	# We need to fork here, as the xmlrpc server will synchronously call us
@@ -192,21 +236,6 @@ HMRPC_EventCB($$$$$)
 	Log(5, "Processing event setting $devid->$attr=$val" );
 	Dispatch($server->{fhemdef},"HMDEV $devid $attr $val",undef);
 	$server->{fhemdef}->{lastcallbackts}=gettimeofday();
-}
-
-sub
-HMRPC_Read($)
-{
-	my ($hash) = @_;
-	
-	#
-	# Handle an incoming callback
-	#
-	my $conn=$hash->{server}->{__daemon}->accept();
-	$conn->timeout(2);
-	$hash->{server}->process_request($conn);
-	$conn->close;
-	undef $conn;
 }
 
 ################################
