@@ -1,0 +1,16 @@
+2015-09-13
+ - Rename module numbers
+2015-09-13
+ - Save blocking call PID and kill process on shutdown
+2015-09-13
+ - Rewrite device address when used in FHEM device name
+2015-09-13
+ - Clean-up callback registration
+2015-09-13
+ - Revamp HMRPC: Callbacks now go through FHEMWEB, no custom XML-RPC HTTP server necessary anymore. Port still hardcoded
+2015-09-12
+ - Reduce timeout, makes FHEMWEB more responsive
+2015-09-11
+ - Short circuit the FHEMWEB introspection calls (get/set ?)
+2015-09-13
+ - Initial commit of fhem/contrib/HMRPC code
