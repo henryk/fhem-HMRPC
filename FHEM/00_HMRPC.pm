@@ -25,6 +25,7 @@ use RPC::XML::Server;
 use RPC::XML::Client;
 use Dumpvalue;
 use HttpUtils;
+use Blocking;
 
 my $dumper=new Dumpvalue;
 $dumper->veryCompact(1);
@@ -38,6 +39,7 @@ sub HMRPC_Initialize($)
 	$hash->{SetFn} = "HMRPC_Set";
 	$hash->{GetFn} = "HMRPC_Get";
 	$hash->{Clients} = ":HMDEV:";
+	$hash->{AttrList} = "callback_base";
 }
 
 #####################################
@@ -50,6 +52,7 @@ HMRPC_Shutdown($)
 	{
 		Log(2,"HMRPC unitializing callback ".$hash->{callbackurl});
 		$hash->{client}->send_request("init",$hash->{callbackurl});
+		delete $data{FWEXT}{$hash->{callbackpath}};
 	}
 	return undef;
 }
@@ -72,15 +75,7 @@ HMRPC_Define($$)
 	$hash->{serverport}=$a[3];
 	
 	$hash->{client}=RPC::XML::Client->new("http://$a[2]:$a[3]/");
-	my $callbackport=5400+$hash->{serverport};
 	$hash->{server}=RPC::XML::Server->new(no_http=>1);
-	if(!ref($hash->{server}))
-	{
-		# Creating the server failed, perhaps because the port was
-		# already in use. Just return the message
-		Log 1,"Can't create HMRPC callback server on port $callbackport. Port in use?";
-		return $hash->{server};
-	}
 	
 	$hash->{server}->{fhemdef}=$hash;
 	
@@ -98,17 +93,22 @@ HMRPC_Define($$)
 		{name=>"listDevices",signature=>["array string"],code=>sub{return RPC::XML::array->new()} }
 	);
 	
-	my $link = "HMRPC_$name";
-	my $url = "/$link";
-	Log3 $name, 3, "Registering HMRPC $name for URL $url...";
-	$data{FWEXT}{$url}{deviceName}= $name;
-	$data{FWEXT}{$url}{FUNC} = "HMRPC_CGI";
-
+	#
+	# Register XML-RPC server with FHEMWEB
+	#
+	$hash->{callbackpath} = "/HMRPC_$name";
+	
+	Log3 $name, 3, "Registering HMRPC $name for URL ". $hash->{callbackpath};
+	$data{FWEXT}{$hash->{callbackpath}}{deviceName}= $name;
+	$data{FWEXT}{$hash->{callbackpath}}{FUNC} = "HMRPC_CGI";
 
 	$hash->{STATE} = "Initialized";
 	
 	# This will also register the callback
-	HMRPC_CheckCallback($hash);
+	# FIXME: Instead of calling HMRPC_CheckCallback() directly we wait 10 seconds to let attributes
+	#  load during boot. How is this to be done correctly?
+	#HMRPC_CheckCallback($hash);
+	InternalTimer(gettimeofday()+10, "HMRPC_CheckCallback", $hash, 0);
 
 	#
 	# All is well
@@ -117,7 +117,8 @@ HMRPC_Define($$)
 }
 
 sub
-HMRPC_CGI() {
+HMRPC_CGI()
+{
 	my ($request) = @_;   # /$infix/filename
 	
 	if($request =~ m,^(/[^/]+)(?:/([^&]*)?(?:&(.*))?)?$,s) {
@@ -179,29 +180,63 @@ sub
 HMRPC_RegisterCallback($)
 {
 	my ($hash) = @_;
+
+	$hash->{STATE} = "Registering";
 	
-	#
-	# We need to find out our local address. In order to do so,
-	# we establish a dummy connection to the remote xmlrpc server
-	# and then look at the local socket address assigned to us.
-	#
-	my $dummysock=IO::Socket::INET->new(PeerAddr=>$hash->{serveraddr},PeerPort=>$hash->{serverport});
-	if(!$dummysock)
-	{
-		Log(2,"HMRPC unable to connect to ".$hash->{serveraddr}.":".$hash->{serverport}." ($!), will retry later");
-		return;
+	# Let user override the callback base address with an attribute, otherwise generate dynamically
+	my $baseaddr = AttrVal($hash->{NAME}, "callback_base", "");
+	if(!$baseaddr) {
+		#
+		# We need to find out our local address. In order to do so,
+		# we establish a dummy connection to the remote xmlrpc server
+		# and then look at the local socket address assigned to us.
+		#
+		my $dummysock=IO::Socket::INET->new(PeerAddr=>$hash->{serveraddr},PeerPort=>$hash->{serverport});
+		if(!$dummysock)
+		{
+			Log(2,"HMRPC unable to connect to ".$hash->{serveraddr}.":".$hash->{serverport}." ($!), will retry later");
+			return;
+		}
+		
+		# FIXME: the ":8083/fhem" section is hard coded, can we somehow get that dynamically from FHEMWEB?
+		$baseaddr="http://".$dummysock->sockhost().":8083/fhem";
+		$dummysock->close();
 	}
 	
-	my $name = $hash->{NAME};
-	$hash->{callbackurl}="http://".$dummysock->sockhost().":8083/fhem/HMRPC_$name/request";
-	$dummysock->close();
+	$hash->{callbackurl} = $baseaddr . $hash->{callbackpath} . "/request";
 	Log(2, "HMRPC callback listening on $hash->{callbackurl}");
-	# We need to fork here, as the xmlrpc server will synchronously call us
-	if(!fork())
-	{
-		$hash->{client}->send_request("init",$hash->{callbackurl},"CB1");
-		Log(2, "HMRPC callback with URL ".$hash->{callbackurl}." initialized");	
-		exit(0);
+
+	# This needs to be done in another process because the CCU will do a synchronous call-back
+	BlockingCall("HMRPC_DoRegister", $hash->{NAME}, "HMRPC_DoRegister_Done", 60);
+}
+
+# Execute the actual registration (in a new process)
+sub
+HMRPC_DoRegister($)
+{
+	my ($name) = @_;
+	my $hash = $defs{$name};
+	
+	$hash->{client}->send_request("init",$hash->{callbackurl},"CB1");
+	Log(2, "HMRPC callback with URL ".$hash->{callbackurl}." initialized");	
+	return "$name|0";
+}
+
+# Update state (in the original process)
+sub
+HMRPC_DoRegister_Done($)
+{
+	my ($string) = @_;
+
+	return unless(defined($string));
+
+	my @a =	split("\\|",$string);
+	my $hash = $defs{$a[0]};
+	my $result = $a[1];
+	
+	if($result eq "0") {
+		Log(2, "HMRPC callback successfully registered");
+		$hash->{STATE} = "Registered";
 	}
 }
 
