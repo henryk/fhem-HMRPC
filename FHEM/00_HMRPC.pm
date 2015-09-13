@@ -48,6 +48,7 @@ HMRPC_Shutdown($)
 {
 	my ($hash) = @_;
 	# Uninitialize again
+	BlockingKill($hash->{helper}{RUNNING_PID}) if(defined($hash->{helper}{RUNNING_PID}));
 	if($hash->{callbackurl})
 	{
 		Log(2,"HMRPC unitializing callback ".$hash->{callbackurl});
@@ -207,7 +208,7 @@ HMRPC_RegisterCallback($)
 	Log(2, "HMRPC callback listening on $hash->{callbackurl}");
 
 	# This needs to be done in another process because the CCU will do a synchronous call-back
-	BlockingCall("HMRPC_DoRegister", $hash->{NAME}, "HMRPC_DoRegister_Done", 60);
+	$hash->{helper}{RUNNING_PID} = BlockingCall("HMRPC_DoRegister", $hash->{NAME}, "HMRPC_DoRegister_Done", 60);
 }
 
 # Execute the actual registration (in a new process)
@@ -238,6 +239,7 @@ HMRPC_DoRegister_Done($)
 		Log(2, "HMRPC callback successfully registered");
 		$hash->{STATE} = "Registered";
 	}
+	delete($hash->{helper}{RUNNING_PID});
 }
 
 #####################################
