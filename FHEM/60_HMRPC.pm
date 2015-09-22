@@ -273,6 +273,7 @@ HMRPC_EventCB($$$$$)
 	Log(5, "Processing event setting $devid->$attr=$val" );
 	Dispatch($server->{fhemdef},"HMDEV $devid $attr $val",undef);
 	$server->{fhemdef}->{lastcallbackts}=gettimeofday();
+	return;
 }
 
 ################################
