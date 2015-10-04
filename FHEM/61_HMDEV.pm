@@ -24,7 +24,7 @@ HMDEV_Initialize($)
   $hash->{ParseFn}   = "HMDEV_Parse";
   $hash->{SetFn}     = "HMDEV_Set";
   $hash->{GetFn}     = "HMDEV_Get";
-  $hash->{AttrList}  = "IODev do_not_notify:0,1";
+  $hash->{AttrList}  = "IODev " . $readingFnAttributes;
 }
 
 #############################
@@ -97,32 +97,7 @@ HMDEV_Parse($$)
   #
   # Ok update the relevant reading
   #
-  my @changed;
-  my $currentval=$hash->{READINGS}{$attrid}{VAL};
-  $hash->{READINGS}{$attrid}{TIME}=TimeNow();
-  # Note that we always trigger a change on PRESS_LONG/PRESS_SHORT events
-  # (they are sent whenever a button is pressed, and there is no change back)
-  # We also never trigger a change on the RSSI readings, for efficiency purposes
-  if(!defined $currentval || ($currentval ne $mp[3]) || ($attrid =~ /^PRESS_/))
-  {
-  	if(defined $currentval && !($currentval =~ m/^RSSI_/))
-  	{
-		push @changed, "$attrid: $mp[3]";
-	}
-	$hash->{READINGS}{$attrid}{VAL}=$mp[3];
-	# Also update the STATE
-	my $state="";
-	foreach my $key (sort(keys(%{$hash->{READINGS}})))
-	{
-		if(length($state))
-		{
-			$state.="  ";
-		}
-		$state.=$key.": ".$hash->{READINGS}{$key}{VAL};
-	}
-	$hash->{STATE}=$state;
-  }
-  $hash->{CHANGED}=\@changed;
+  readingsSingleUpdate($hash, $attrid, $mp[3], 1);
   
   return $hash->{NAME};
 }

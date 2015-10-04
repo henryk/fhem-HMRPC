@@ -1,3 +1,5 @@
+2015-10-04
+ - Replace home-brewn code with a call to readingsSingleUpdate(). This will allow $readingFnAttributes, but break existing behaviour: You need to specify stateFormat explicitly if you want it. (Also RSSI readings are now not special cased anymore, so you may need to set event-on-update-reading as appropriate if that's what you want).
 2015-09-22
  - Explicitly return void from "event" callback
 2015-09-20
